@@ -2,6 +2,10 @@ import pypruss
 import sys
 import math
 from fifo import Fifo
+import time
+
+# Engage simulator instead of PRU?
+sim = False 
 
 def init(pru_bin):
   pypruss.modprobe(1024)
@@ -20,7 +24,7 @@ def init(pru_bin):
 class Stepper:
   def __init__(self, fifo):
     self.fifo = fifo
-    self.cscale = 128
+    self.cscale = 1024
     self.a = math.pi/200/16
     self.f = 2e8
     self.lastacc = None
@@ -68,7 +72,6 @@ class Stepper:
 
 class SimFifo:
   def __init__(self):
-    self.back = 0
     self.c = 0
     self.rest = 0
 
@@ -90,12 +93,8 @@ class SimFifo:
 #      self.rest = 0
       pass
 
-  def front(self):
-    return 0
-
 steps, speed, acc, dec = (float(arg) for arg in sys.argv[1:5])
 
-sim = False
 if sim:
   fifo = SimFifo()
 else:
@@ -104,18 +103,19 @@ else:
 stepper = Stepper(fifo)
 stepper.move(steps, speed, acc, dec)
 
-fifo.write([0,0,0,0])
-
-olda = fifo.front()
-while True:
-  a = fifo.front()
-  if not olda == a:
-    print 'front:',a
-    olda = a
-  if a == fifo.back:
-    break
-
 if not sim:
+  fifo.write([0,0,0,0])
+
+  olda = fifo.front()
+  while True:
+    a = fifo.front()
+    if not olda == a:
+      print 'front:',a
+      olda = a
+    if a == fifo.back:
+      break
+    time.sleep(0.1)
+
   pypruss.wait_for_event(0)
   pypruss.clear_event(0)
   pypruss.pru_disable(0)
