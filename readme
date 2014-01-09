@@ -1,0 +1,10 @@
+This is a hack to drive a stepper motor with acceleration based on Atmel's AVR446 application note.
+You need PyPRUSS.
+
+Usage:
+python stepper.py <num steps> <speed> <accel> <decel>
+
+For example: 500000 steps at 100 rad/s (assuming 200 step/rev motor with 1/32 microstepping)
+python stepper.py 500000 100 500 500
+
+It will drive GPIO0 pin 27 with a positive flank for each step.
