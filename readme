@@ -9,7 +9,7 @@ Instructions:
 The code depends on PyPRUSS by Elias Bakken (https://bitbucket.org/intelligentagent/pypruss).
 Install and make sure you can run the examples.
 
-This code is setup to drive GPIO0 pin 27 with a positive flank for each step, and pulse with of 1.9 us, which suits standard pololou stepper drivers.
+This code is setup to drive GPIO0 pin 27 with a positive flank for each step, and pulse width of 1.9 us, which suits standard pololou stepper drivers.
 
 You need to configure the pin as an output using a device tree overlay. I followed this example:
 http://hipstercircuits.com/beaglebone-black-gpio-mux-for-pru-with-device-tree-overlay/
