@@ -1,10 +1,25 @@
-This is a hack to drive a stepper motor with acceleration based on Atmel's AVR446 application note.
-You need PyPRUSS.
+This is a hack to drive a stepper motor with acceleration ramps from a BeagleBone using the PRU for real time control.
+Development by Stefan Langemark and Håkan Langemark. (Mostly Stefan so far...)
+
+Demonstration on youtube: http://youtu.be/YlDHBbKrRtU
+
+Acceleration ramp maths based on Atmel's AVR446 application note.
+
+Instructions:
+The code depends on PyPRUSS by Elias Bakken (https://bitbucket.org/intelligentagent/pypruss).
+Install and make sure you can run the examples.
+
+This code is setup to drive GPIO0 pin 27 with a positive flank for each step, and pulse with of 1.9 us, which suits standard pololou stepper drivers.
+
+You need to configure the pin as an output using a device tree overlay. I followed this example:
+http://hipstercircuits.com/beaglebone-black-gpio-mux-for-pru-with-device-tree-overlay/
+The output will be on P8-17.
 
 Usage:
 python stepper.py <num steps> <speed> <accel> <decel>
 
-For example: 500000 steps at 100 rad/s (assuming 200 step/rev motor with 1/32 microstepping)
+For example: 500000 steps at medium acceleration up to 100 rad/s = about 16 revs/s (assuming 200 step/rev motor and 1/32 microstepping)
 python stepper.py 500000 100 500 500
 
-It will drive GPIO0 pin 27 with a positive flank for each step.
+Known bugs:
+Yes. 
