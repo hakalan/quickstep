@@ -129,7 +129,7 @@ done:
   // remainder = (c*2+remainder)%(4*n+1)
   add Command.n, Command.n, 1
   lsl nom, Command.c, 1
-  add nom, nom, global.remainder
+//  add nom, nom, global.remainder
   lsl den, Command.n, 2
   add den, den, 1
   divide nom, den, quot, global.remainder, r0
@@ -148,9 +148,9 @@ decel:
   // remainder = (c*2+remainder)%(4*n+1)
   sub Command.n, Command.n, 1
   lsl nom, Command.c, 1
-  add nom, nom, global.remainder
+//  add nom, nom, global.remainder
   lsl den, Command.n, 2
-  add den, den, 1
+  sub den, den, 1
   divide nom, den, quot, global.remainder, r0
   add Command.c, Command.c, quot
 

@@ -64,7 +64,7 @@ class SimFifo:
       rest = 0
       for step in range(acc_steps):
         n += 1
-        nom = 2*c+rest
+        nom = 2*c
         den = 4*n+1
         c -= nom/den
         rest = nom%den
@@ -76,8 +76,8 @@ class SimFifo:
       dec_steps = steps-dec_start
       for step in range(dec_steps):
         dec_n -= 1
-        nom = 2*c+rest
-        den = 4*dec_n+1
+        nom = 2*c
+        den = 4*dec_n-1
         c += nom/den
         rest = nom%den
         if step<10 or step>=dec_steps-10:
