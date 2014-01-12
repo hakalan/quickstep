@@ -4,90 +4,158 @@
 .origin 0
 .entrypoint START
 
-.struct CommandDefs
+#define StateAcc 0
+#define StateConst 1
+#define StateDec 2
+
+.struct CmdParams
   .u32 steps
   .u32 c
   .u32 n
-  .u32 const
+  .u32 acc_steps
+  .u32 dec_start
+  .u32 steps1
+  .u32 steps2
+  .u32 steps3
+  .u32 steps4
 .ends
 
+.struct StepperRuntime
+  .u32 out
+  .u32 error
+.ends
+
+.struct RamDefs
+  .u32 ddr_address
+.ends
+
+.struct Global
+  .u32 remainder
+  .u32 stepsdone
+  .u32 t_addr
+.ends
+
+// r0-r3 are temporary variables
+#define tmp r0
+#define nom r1
+#define den r2
+#define quot r3
+
+// r5 and up are global
+.assign Global, r5, r7, global
+
 .assign FifoDefs, r8, r10, Fifo
-.assign CommandDefs, r11, r14, Command
+
+// Sharing memory for command parameters
+.assign CmdParams, r11, r19, Command
+
+.assign StepperRuntime, r20, r21, stepper1
+.assign StepperRuntime, r22, r23, stepper2
+.assign StepperRuntime, r24, r25, stepper3
+.assign StepperRuntime, r26, r27, stepper4
 
 #define GPIO0 0x44E07000
+#define GPIO1 0x4804c000
 #define GPIO_CLEARDATAOUT 	0x190
 #define GPIO_SETDATAOUT 	0x194
-#define STEP (1<<27)
+#define TOGGLE_GPIO 0x4
 
-#define t_addr r7
+#define STEP1 (1<<27)
+#define STEP2 (1<<22)
+#define STEP3 (1<<23)
+#define STEP4 (1<<24)
+
+.macro stepmotor
+.mparam motor, msteps, xsteps, next
+  sub motor.error, motor.error, msteps
+  qbbc next, motor.error,31
+  add motor.error, motor.error, xsteps
+
+  // toggle output pin
+  mov r2, STEP1
+  sbbo r2, motor.out, 0, 4
+  xor motor.out, motor.out, TOGGLE_GPIO
+.endm
 
 START:
   call init_fifo
-  mov t_addr, Fifo.addr
-  add t_addr, t_addr, 80
-
+  mov global.t_addr, Fifo.addr
+  add global.t_addr, global.t_addr, 80
+  mov stepper1.out, GPIO0 | GPIO_SETDATAOUT
+  mov stepper2.out, GPIO1 | GPIO_SETDATAOUT
+  mov stepper3.out, GPIO1 | GPIO_SETDATAOUT
+  mov stepper4.out, GPIO1 | GPIO_SETDATAOUT
+  
 NEXT_COMMAND:
-  mov r6, Command.c // Store current c
   call load_command
+  reset_cyclecount r1
 
-  // If new c is 0, reuse last c
-  qbne keep_c, Command.c, 0
-  mov Command.c, r6
-keep_c:
-  call check_end_command
-  reset_cyclecount r6
+  // End?
+  qbne not_end, Command.steps, 0
+  mov R31.b0, PRU0_ARM_INTERRUPT+16
+  halt
+not_end:
+
+  // Do move
+  mov global.stepsdone, 0
+  mov global.remainder, 0
+  lsr stepper1.error, Command.steps, 1
+  lsr stepper2.error, Command.steps, 1
+  lsr stepper3.error, Command.steps, 1
+  lsr stepper4.error, Command.steps, 1
 
 wait:
   get_cyclecount r1
-// Apply c-scale factor 128=1<<7
-  lsl r1, r1, 7
+// Apply c-scale factor 1024=1<<10
+  lsl r1, r1, 10
   qbgt wait, r1, Command.c
 
-  // step on
-  MOV r2, STEP
-  MOV r3, GPIO0 | GPIO_SETDATAOUT
-  SBBO r2, r3, 0, 4
+  reset_cyclecount r1
 
-  reset_cyclecount r6
+// Move steppers
+  stepmotor stepper1, Command.steps1, Command.steps, step2
+step2:
+  stepmotor stepper2, Command.steps2, Command.steps, step3
+step3:
+  stepmotor stepper3, Command.steps3, Command.steps, step4
+step4:
+  stepmotor stepper3, Command.steps4, Command.steps, done
 
-//  sbbo Command.c, t_addr, 0, 4
-//  add t_addr, t_addr, 4
+done:
+  add global.stepsdone, global.stepsdone, 1
+  qbgt acc_done, Command.acc_steps, global.stepsdone
 
-  qbeq const_speed, Command.const, 1
-  call calc_next_delay
-const_speed:
+  // quot = (c*2+remainder)/(4*n+1)
+  // remainder = (c*2+remainder)%(4*n+1)
+  add Command.n, Command.n, 1
+  lsl nom, Command.c, 1
+  add nom, nom, global.remainder
+  lsl den, Command.n, 2
+  add den, den, 1
+  divide nom, den, quot, global.remainder, r0
+  sub Command.c, Command.c, quot
 
-  mov r6, 380 // 1.9us min step time for DRV8825
-min_ontime:
-  get_cyclecount r1
-  qbgt min_ontime, r1, r6
+  qba wait
 
-  // step off?
-  MOV r2, STEP
-  MOV r3, GPIO0 | GPIO_CLEARDATAOUT
-  SBBO r2, r3, 0, 4
+acc_done:
+  qbgt decel, Command.dec_start, global.stepsdone
+  qba wait
 
-//  sbbo r5, t_addr, 0, 8
-//  add t_addr, t_addr, 8
+decel:
+  qbgt NEXT_COMMAND, Command.steps, global.stepsdone
 
-  sub Command.steps, Command.steps, 1
-  qblt wait, Command.steps, 0
+  // quot = (c*2+remainder)/(4*n+1)
+  // remainder = (c*2+remainder)%(4*n+1)
+  sub Command.n, Command.n, 1
+  lsl nom, Command.c, 1
+  add nom, nom, global.remainder
+  lsl den, Command.n, 2
+  add den, den, 1
+  divide nom, den, quot, global.remainder, r0
+  add Command.c, Command.c, quot
 
-  jmp NEXT_COMMAND
+  qba wait
 
 #include "fifo.p"
 
-#define nom r3
-#define den r4
-#define quot r5
-#define rem r6
 
-calc_next_delay:
-  // c = c - c*2/(4*(++n)+1)
-  lsl nom, Command.c, 1
-  add Command.n, Command.n, 1
-  lsl den, Command.n, 2
-  add den, den, 1
-  divide nom, den, quot, rem, r0
-  sub Command.c, Command.c, quot
-  ret

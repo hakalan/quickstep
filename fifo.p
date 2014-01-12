@@ -27,11 +27,4 @@ load_command:
   sbbo Fifo.front, Fifo.addr, OFFSET(Fifo.front), SIZE(Fifo.front)
   ret
 
-check_end_command:
-  // 0 signals end
-  qbne not_end, Command, 0
-  mov R31.b0, PRU0_ARM_INTERRUPT+16
-  halt
-  not_end:
-  ret  
 

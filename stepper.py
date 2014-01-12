@@ -5,10 +5,10 @@ from fifo import Fifo
 import time
 
 # Engage simulator instead of PRU?
-sim = False 
+sim = True
 
 def init(pru_bin):
-  pypruss.modprobe(1024)
+  pypruss.modprobe()
   ddr_addr = pypruss.ddr_addr()
   ddr_size = pypruss.ddr_size()
   print "DDR memory address is 0x%x and the size is 0x%x"%(ddr_addr, ddr_size)
@@ -27,71 +27,61 @@ class Stepper:
     self.cscale = 1024
     self.a = math.pi/200/16
     self.f = 2e8
-    self.lastacc = None
-    self.n = 0
+    self.numaxis = 4
 
   def acc_steps(self, speed_diff, acc):
     return int(speed_diff**2/(2*self.a*acc))
 
-  def change_n(self, acc):
-    self.n = int(self.lastacc/acc*self.n)
-#    self.n = int(round(self.lastacc/acc*(self.n+0.5)-0.5))
-    self.lastacc = acc
+  def ramp(self, acc):
+    n = 0
+    c = int(0.676*self.f*math.sqrt(2*self.a/acc)*self.cscale)
+    return c, n
 
-  def ramp(self, steps, acc):
-    c = 0
-    if abs(self.n) <= 1:
-      self.n = 0
-      c = int(0.676*self.f*math.sqrt(2*self.a/acc)*self.cscale)
-#      c = int(round(0.676*self.f*math.sqrt(2*self.a/acc)))
-      self.lastacc = acc
-    else:
-      self.change_n(acc)
-
-    self.fifo.write([steps, c, self.n, 0], 'l')
-    self.n += steps
-
-  def run(self, steps):
-    self.fifo.write([steps, 0, 0, 1], 'l')
-
-  def constant(self, steps, speed):
-    cspeed = int(round(self.a*self.f/speed*self.cscale))
-    self.fifo.write([steps, cspeed, 0, 1],'l')
+  def stop(self):
+    self.fifo.write([0]*(6+self.numaxis), 'l')
 
   def move(self, steps, speed, acc, dec):
+    steps = int(steps)
     acc_steps_to_speed = self.acc_steps(speed, acc)
     acc_meets_dec_steps = int(steps*dec/(acc + dec) + 0.5)
+    c, n = self.ramp(acc)
     if acc_meets_dec_steps < acc_steps_to_speed:
-      self.ramp(acc_meets_dec_steps, acc)
-      self.ramp(steps - acc_meets_dec_steps, -dec)
+      dec_n = steps-acc_meets_dec_steps+1
+      self.fifo.write([steps, c, n, dec_n, acc_meets_dec_steps, acc_meets_dec_steps, steps, steps, steps, steps])
     else:
-      self.ramp(acc_steps_to_speed, acc)
       dec_steps = self.acc_steps(speed, dec)
-      self.constant(steps - acc_steps_to_speed - dec_steps, speed)
-      self.ramp(dec_steps, -dec)
+      dec_n = dec_steps+1
+      self.fifo.write([steps, c, n, dec_n, acc_steps_to_speed, steps-dec_steps]+[steps]*self.numaxis)
 
 class SimFifo:
   def __init__(self):
-    self.c = 0
-    self.rest = 0
+    pass
 
   def write(self, l, type="L"):
     print l
-    steps, newc, n, const = l
-    if newc != 0:
-      self.c = newc 
-    if const==0:
-      for step in range(int(steps)-1):
+    steps, c, n, dec_n, acc_steps, dec_start, a,b,c,d  = l
+    if steps>0:
+      rest = 0
+      for step in range(acc_steps):
         n += 1
-        nom = 2*self.c
+        nom = 2*c+rest
         den = 4*n+1
-        self.c = self.c - (nom+self.rest)/den
-        self.rest = nom%den
-        if step<20 or step>=steps-20:
-          print n, self.c
-    else:
-#      self.rest = 0
-      pass
+        c -= nom/den
+        rest = nom%den
+        if step<10 or step>=acc_steps-10:
+          print n, c
+
+      rest = 0
+
+      dec_steps = steps-dec_start
+      for step in range(dec_steps):
+        dec_n -= 1
+        nom = 2*c+rest
+        den = 4*dec_n+1
+        c += nom/den
+        rest = nom%den
+        if step<10 or step>=dec_steps-10:
+          print dec_n, c
 
 steps, speed, acc, dec = (float(arg) for arg in sys.argv[1:5])
 
@@ -102,10 +92,9 @@ else:
 
 stepper = Stepper(fifo)
 stepper.move(steps, speed, acc, dec)
+stepper.stop()
 
 if not sim:
-  fifo.write([0,0,0,0])
-
   olda = fifo.front()
   while True:
     a = fifo.front()
