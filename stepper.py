@@ -29,37 +29,59 @@ class Stepper:
     self.f = 2e8
     self.numaxis = 4
 
-  def acc_steps(self, speed_diff, acc):
-    return int(speed_diff**2/(2*self.a*acc))
+  def acc_steps(self, v, acc):
+    return int(v**2/(2*self.a*acc) + 0.5)
 
-  def ramp(self, acc):
-    n = 0
-    c = int(0.676*self.f*math.sqrt(2*self.a/acc)*self.cscale)
-    return c, n
+  def calc_c(self, acc, n):
+    c = self.f*math.sqrt(2*self.a/acc) * (math.sqrt(n+1)-math.sqrt(n))
+    if n==0:
+      # Compensate for Taylor series error at c0
+      c *= 0.676
+    return int(c*self.cscale + 0.5)
+
+  def calc_cmin(self, v):
+     return int(self.f*self.a/self.v*self.cscale + 0.5)
 
   def stop(self):
     self.fifo.write([0]*(6+self.numaxis), 'l')
 
-  def move(self, steps, speed, acc, dec):
+  def move(self, steps, v0, v1, v2, acc, dec):
     steps = int(steps)
-    acc_steps_to_speed = self.acc_steps(speed, acc)
-    acc_meets_dec_steps = int(steps*dec/(acc + dec) + 0.5)
-    c, n = self.ramp(acc)
+
+    acc_steps_to_init = self.acc_steps(v0, acc)
+    acc_steps_to_speed = self.acc_steps(v1, acc) - acc_steps_to_init
+    dec_steps_past_end = self.acc_steps(v2, dec)
+
+    asteps = steps + acc_steps_to_init + dec_steps_past_end
+
+    acc_meets_dec_steps = int(asteps*dec/(acc + dec) + 0.5) - acc_steps_to_init
+
+    c = self.calc_c(acc, acc_steps_to_init)
+#    cmin = self.calc_cmin(v1)
+
     if acc_meets_dec_steps < acc_steps_to_speed:
-      dec_n = steps-acc_meets_dec_steps+1
-      self.fifo.write([steps, c, n, dec_n, acc_meets_dec_steps, acc_meets_dec_steps, steps, steps, steps, steps])
+      dec_n = steps - acc_meets_dec_steps + dec_steps_past_end + 1
+      self.fifo.write([steps, c, acc_steps_to_init, dec_n, 
+                       acc_meets_dec_steps, acc_meets_dec_steps]+
+                      [steps]*self.numaxis)
+
     else:
-      dec_steps = self.acc_steps(speed, dec)
-      dec_n = dec_steps+1
-      self.fifo.write([steps, c, n, dec_n, acc_steps_to_speed, steps-dec_steps]+[steps]*self.numaxis)
+      dec_steps = self.acc_steps(v1, dec)
+      dec_n = dec_steps + 1
+      self.fifo.write([steps, c, acc_steps_to_init, dec_n, 
+                       acc_steps_to_speed, steps+dec_steps_past_end-dec_steps]+
+                      [steps]*self.numaxis)
 
 class SimFifo:
-  def __init__(self):
-    pass
+  def speed(self, c):
+    cscale = 1024
+    a = math.pi/200/16
+    f = 2e8
+    return cscale*a*f/c
 
   def write(self, l, type="L"):
     print l
-    steps, c, n, dec_n, acc_steps, dec_start, a,b,c,d  = l
+    steps, c, n, dec_n, acc_steps, dec_start, na,nb,nc,nd  = l
     if steps>0:
       rest = 0
       for step in range(acc_steps):
@@ -69,7 +91,7 @@ class SimFifo:
         c -= nom/den
         rest = nom%den
         if step<10 or step>=acc_steps-10:
-          print n, c
+          print n, c, self.speed(c)
 
       rest = 0
 
@@ -81,9 +103,7 @@ class SimFifo:
         c += nom/den
         rest = nom%den
         if step<10 or step>=dec_steps-10:
-          print dec_n, c
-
-steps, speed, acc, dec = (float(arg) for arg in sys.argv[1:5])
+          print dec_n, c, self.speed(c)
 
 if sim:
   fifo = SimFifo()
@@ -91,7 +111,26 @@ else:
   fifo = init('./stepper.bin')
 
 stepper = Stepper(fifo)
-stepper.move(steps, speed, acc, dec)
+
+if len(sys.argv)==7:
+  steps, v0, v1, v2, acc, dec = (float(arg) for arg in sys.argv[1:7])
+
+  stepper.move(steps, v0, v1, v2, acc, dec)
+  stepper.stop()
+
+else:
+  # Do a test sequence
+  acc = dec = 1000
+  v = [25, 100, 50, 125]
+  n = [10000, 20000, 10000, 20000]
+
+  for steps, v0, v1, v2 in zip(n, [0]+v[:-1], v, v[1:]+[0]):
+    if v2>v1:
+      v2=v1
+    if v0>v1: 
+      v0=v1
+    stepper.move(steps, v0, v1, v2, acc, dec)
+
 stepper.stop()
 
 if not sim:
