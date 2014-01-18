@@ -11,9 +11,9 @@ class Fifo:
 
     self.ddr_start = hack
     self.ddr_end = hack+ddr_size
-    self.back = 8
+    self.back = 12
     self.fifo_size = 1024
-    self.memwrite(0,[8, self.back])
+    self.memwrite(0, [12, self.back, 0])
 
   def memwrite(self, offset, data, type = 'L'):
     print 'write',data,'to',offset
@@ -27,10 +27,13 @@ class Fifo:
     return struct.unpack(type*length,
       self.ddr_mem[begin:begin+4*length])
 
+  def dbgread(self, type = 'L'):
+    return self.memread(8, 1, type)
+
   def write(self, data, type = 'L'):
     self.back += self.memwrite(self.back, data, type)
     if self.back >= self.fifo_size:
-      self.back = 8
+      self.back = 12
     self.memwrite(4, [self.back])
 
   def front(self):

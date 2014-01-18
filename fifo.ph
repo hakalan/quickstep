@@ -6,7 +6,7 @@
 
 #define COUNTER_ENABLE_BIT 3
 
-#define FIFO_ADDR 8
+#define FIFO_ADDR 12
 #define FIFO_LENGTH 1024
 #define COMMAND_RAM 4
 
@@ -32,6 +32,7 @@
   sbbo tmp, addr, CYCLECOUNT, 4
 
   set ctrl, COUNTER_ENABLE_BIT
+//  set ctrl, 8 // singlestep
   sbbo ctrl, addr, CONTROL, 4
 .endm
 

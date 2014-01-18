@@ -5,7 +5,8 @@ from fifo import Fifo
 import time
 
 # Engage simulator instead of PRU?
-sim = True
+sim = False
+psim = 1
 
 def init(pru_bin):
   pypruss.modprobe()
@@ -17,23 +18,24 @@ def init(pru_bin):
   pypruss.init()
   pypruss.open(0)
   pypruss.pruintc_init()
-  pypruss.pru_write_memory(0,0,[ddr_addr])
+  pypruss.pru_write_memory(0,0,[ddr_addr, psim])
   pypruss.exec_program(0, pru_bin)
   return fifo
 
 class Stepper:
   def __init__(self, fifo):
     self.fifo = fifo
-    self.cscale = 1024
+    self.cscale = 256
     self.a = math.pi/200/16
     self.f = 2e8
     self.numaxis = 4
+    self.v0 = 0
 
   def acc_steps(self, v, acc):
     return int(v**2/(2*self.a*acc) + 0.5)
 
   def calc_c(self, acc, n):
-    c = self.f*math.sqrt(2*self.a/acc) * (math.sqrt(n+1)-math.sqrt(n))
+    c = self.f*(math.sqrt(2*self.a/acc*(n+1))-math.sqrt(2*self.a/acc*n))
     if n==0:
       # Compensate for Taylor series error at c0
       c *= 0.676
@@ -45,10 +47,10 @@ class Stepper:
   def stop(self):
     self.fifo.write([0]*(6+self.numaxis), 'l')
 
-  def move(self, steps, v0, v1, v2, acc, dec):
+  def move(self, steps, v1, v2, acc, dec):
     steps = int(steps)
 
-    acc_steps_to_init = self.acc_steps(v0, acc)
+    acc_steps_to_init = self.acc_steps(self.v0, acc)
     acc_steps_to_speed = self.acc_steps(v1, acc) - acc_steps_to_init
     dec_steps_past_end = self.acc_steps(v2, dec)
 
@@ -71,6 +73,7 @@ class Stepper:
       self.fifo.write([steps, c, acc_steps_to_init, dec_n, 
                        acc_steps_to_speed, steps+dec_steps_past_end-dec_steps]+
                       [steps]*self.numaxis)
+    self.v0 = v2
 
 class SimFifo:
   def speed(self, c):
@@ -112,11 +115,10 @@ else:
 
 stepper = Stepper(fifo)
 
-if len(sys.argv)==7:
-  steps, v0, v1, v2, acc, dec = (float(arg) for arg in sys.argv[1:7])
+if len(sys.argv)==5:
+  steps, v, acc, dec = (float(arg) for arg in sys.argv[1:5])
 
-  stepper.move(steps, v0, v1, v2, acc, dec)
-  stepper.stop()
+  stepper.move(steps, v, 0, acc, dec)
 
 else:
   # Do a test sequence
@@ -129,7 +131,7 @@ else:
       v2=v1
     if v0>v1: 
       v0=v1
-    stepper.move(steps, v0, v1, v2, acc, dec)
+    stepper.move(steps, v1, v2, acc, dec)
 
 stepper.stop()
 
@@ -142,7 +144,8 @@ if not sim:
       olda = a
     if a == fifo.back:
       break
-    time.sleep(0.1)
+    time.sleep(0.01)
+    print fifo.dbgread()
 
   pypruss.wait_for_event(0)
   pypruss.clear_event(0)
